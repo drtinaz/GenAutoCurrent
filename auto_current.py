@@ -5,6 +5,7 @@ import logging
 import os
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
+from ve_utils import wrap_dbus_value
 
 LOG_FILE = "/data/GenAutoCurrent/log"
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
@@ -133,9 +134,8 @@ class GeneratorDeratingMonitor:
         try:
             obj = self.bus.get_object(service_name, path)
             interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
-            interface.SetValue(dbus.Double(value))
-            # This is the original log that you want to conditionally keep
-            # logging.info(f"Set {service_name}{path} to {value}") # Re-inserted
+            # Use wrap_dbus_value here
+            interface.SetValue(wrap_dbus_value(value))
         except Exception as e:
             logging.error(f"Error setting value for {service_name}{path} to {value}: {e}")
 
