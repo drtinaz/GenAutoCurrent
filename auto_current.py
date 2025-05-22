@@ -6,7 +6,7 @@ import os
 import sys
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
-# sys.path.insert(1, "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python")
+sys.path.insert(1, "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python")
 from ve_utils import wrap_dbus_value
 
 LOG_FILE = "/data/GenAutoCurrent/log"
