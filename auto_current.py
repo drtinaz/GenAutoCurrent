@@ -34,9 +34,9 @@ PRODUCT_NAME_PATH = "/ProductName"
 BUS_ITEM_INTERFACE = "com.victronenergy.BusItem"
 GENERATOR_CURRENT_LIMIT_PATH = "/Settings/TransferSwitch/GeneratorCurrentLimit"
 
-# Transfer switch state values
-GENERATOR_ON_VALUE = 12
-SHORE_POWER_ON_VALUE = 13
+# Transfer switch state values (both original and new values are listed)
+GENERATOR_ON_VALUE = (12, 3) # Original value 12, new value 3
+SHORE_POWER_ON_VALUE = (13, 2) # Original value 13, new value 2
 
 # Derating Constants
 BASE_TEMPERATURE_THRESHOLD_F = 77.0
@@ -281,7 +281,8 @@ class GeneratorDeratingMonitor:
     def _is_generator_running(self):
         if self.transfer_switch_service:
             state = self._get_dbus_value(self.transfer_switch_service, STATE_PATH)
-            return state == GENERATOR_ON_VALUE
+            # Check if the state is in the GENERATOR_ON_VALUE tuple
+            return state in GENERATOR_ON_VALUE
         return False
 
     def calculate_derating_factor(self, temperature_fahrenheit, altitude_feet, generator_temperature_fahrenheit):
@@ -363,6 +364,8 @@ class GeneratorDeratingMonitor:
         This helps prevent a looping problem by only reacting to external changes
         in the AC input limit.
         """
+        # I'm assuming that 'Gen Auto Current' being 'on/enabled' corresponds to the NEW_GENERATOR_ON_VALUE (3)
+        # and that any other state means it's 'off/disabled'.
         if self.vebus_service and self._is_generator_running() and self.gen_auto_current_state != 3:
             current_ac_limit = self._get_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH)
             if current_ac_limit is not None:
@@ -385,7 +388,7 @@ class GeneratorDeratingMonitor:
             if not self._is_generator_running():
                 logging.debug("Generator not running, AC Active Input Current Limit not synced to generator current limit.")
             elif self.gen_auto_current_state == 3:
-                logging.debug("'Gen Auto Current' is ON, AC Active Input Current Limit not synced to generator current limit.")
+                logging.debug("'Gen Auto Current' is ON (3), AC Active Input Current Limit not synced to generator current limit.")
 
     def _periodic_monitoring(self):
         #logging.info(">>>> _periodic_monitoring heartbeat <<<<") # Re-inserted (original line)
