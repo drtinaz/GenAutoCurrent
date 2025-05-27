@@ -15,3 +15,5 @@ v1.4
 	added functionality so this script can be used not only with kevins guimods transfer switch,
 	but also any other script that uses a bilge pump on/off digital input for the transfer switch state
 	removed the requirement that guimods be installed
+v1.5
+	update syncing active ac input current to gen current setting to prevent a manual setting of the active current limit from sticking and no longer recieving updates when the auto current feature is enabled. This corrects a scenario where the user could potentially change the active ac current limit and the derating would not get restored unless the actual derated value has changed. With this update, as long as the auto update feature is enabled, the derated value will always override the manually entered value.

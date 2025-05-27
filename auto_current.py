@@ -359,14 +359,15 @@ class GeneratorDeratingMonitor:
 
     def _sync_generator_limit_from_ac_input(self):
         """
-        Synchronizes the generator current limit to the AC input limit
-        when the generator is running and 'Gen Auto Current' is off/disabled.
+        Synchronizes the generator current limit to the Active AC input limit
+        when the generator is running. This prevents the user from manually setting the Active AC Current
+        limit to a different value when the auto gen current limit feature is active. (Ensures that the derate value will
+        always overrule the manual setting when the auto feature is active)
         This helps prevent a looping problem by only reacting to external changes
         in the AC input limit.
         """
-        # I'm assuming that 'Gen Auto Current' being 'on/enabled' corresponds to the NEW_GENERATOR_ON_VALUE (3)
-        # and that any other state means it's 'off/disabled'.
-        if self.vebus_service and self._is_generator_running() and self.gen_auto_current_state != 3:
+        
+        if self.vebus_service and self._is_generator_running():
             current_ac_limit = self._get_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH)
             if current_ac_limit is not None:
                 rounded_ac_limit = round(float(current_ac_limit), 1)
@@ -376,12 +377,12 @@ class GeneratorDeratingMonitor:
                     current_gen_limit = self._get_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH)
                     if current_gen_limit is None or abs(current_gen_limit - rounded_ac_limit) > 0.01:
                         self._set_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH, rounded_ac_limit)
-                        logging.info(f"Generator running and 'Gen Auto Current' is OFF/DISABLED: Synced Generator Current Limit to VE.Bus AC Active Input Current Limit ({rounded_ac_limit:.1f} Amps).")
+                        logging.info(f"Generator running and Active AC Current Limit has been manually changed: Synced Generator Current Limit to VE.Bus AC Active Input Current Limit ({rounded_ac_limit:.1f} Amps).")
                         self.previous_generator_current_limit_setting = rounded_ac_limit # Keep previous gen limit in sync
 
                     self.previous_ac_current_limit = rounded_ac_limit # Update the previous AC limit to prevent looping
                 else:
-                    logging.debug(f"Generator running and 'Gen Auto Current' is OFF/DISABLED: VE.Bus AC Active Input Current Limit ({rounded_ac_limit:.1f} Amps) has not changed.")
+                    logging.debug(f"Generator running: VE.Bus AC Active Input Current Limit ({rounded_ac_limit:.1f} Amps) has not changed.")
             else:
                 logging.warning("Could not retrieve VE.Bus AC Active Input Current Limit. Cannot sync to generator current limit.")
         elif self.vebus_service:
