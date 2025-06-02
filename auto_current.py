@@ -23,7 +23,7 @@ TEMPERATURE_SERVICE_BASE = "com.victronenergy.temperature"
 SETTINGS_SERVICE_NAME = "com.victronenergy.settings"
 GPS_SERVICE_BASE = "com.victronenergy.gps"
 DIGITAL_INPUT_SERVICE_BASE = "com.victronenergy.digitalinput"
-SYSTEM_SERVICE = "com.victronenergy.system" # For generator temperature
+SYSTEM_SERVICE = "com.victronenergy.system"
 
 ALTITUDE_PATH = "/Altitude"
 AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH = "/Ac/ActiveIn/CurrentLimit"
@@ -34,24 +34,66 @@ PRODUCT_NAME_PATH = "/ProductName"
 BUS_ITEM_INTERFACE = "com.victronenergy.BusItem"
 GENERATOR_CURRENT_LIMIT_PATH = "/Settings/TransferSwitch/GeneratorCurrentLimit"
 
-# Transfer switch state values (both original and new values are listed)
-GENERATOR_ON_VALUE = (12, 3) # Original value 12, new value 3
-SHORE_POWER_ON_VALUE = (13, 2) # Original value 13, new value 2
+# Transfer switch state values
+GENERATOR_ON_VALUE = (12, 3) # value 12 if using Guimods, value 3 if not
+SHORE_POWER_ON_VALUE = (13, 2) # value 13 if using Guimods, value 2 if not
 
-# Derating Constants
+#############################################################
+####### User Configurable Settings ##########################
+#############################################################
+
+###### Derating Constants ###########
+
+# Base Temperature Threshold is the ambient (outdoor) temperature at which point
+# the generator output begins to be derated. Usually this is 77 deg F
 BASE_TEMPERATURE_THRESHOLD_F = 77.0
+
+# Temp coefficient is the multiplier that the output should be derated above the base
+# Temperature Threshold. (ie. if the output is to be derated 6% for every 10 deg F
+# above the base temp threshold, the coefficent is determined by multiplying the 
+# percent in decimal form '.06' by the number of feet '10' = 0.006. you must include the leading zero)
 TEMP_COEFFICIENT = 0.006
+
+# Altitude Coefficient is the multiplier that the output is to be derated per foot above sea level.
+# (ie. if the derating for altitude is 3% for every 1000 feet above sea level, then the coefficient
+# is determined by multiplying the percentage in deccimal form '.03' by the number of feet '1000' = 0.0003.
+# You must include the leading zero.)
 ALTITUDE_COEFFICIENT = 0.00003
+
+# Base Generator Output is the rated output capacity of the generator at sea level, in amps.
 BASE_GENERATOR_OUTPUT_AMPS = 62.5
+
+# Output Buffer is used to prevent the generator from operating at maximum output capacity.
+# The calculated generator output will be multiplied by this factor. (to limit the generator output
+# to 90% of rated capacity, set this to 0.9)
 OUTPUT_BUFFER = 0.9
+
+# High GenTemp Threshold is the generator temperature at which the calculated output will be multiplied
+# by the High GenTemp reduction value
 HIGH_GENTEMP_THRESHOLD_F = 222.0
+
+# Medium GenTemp Threshold is the generator temperature at which the calculated output will be multiplied
+# by the Medium Gentemp reduction value
 MEDIUM_GENTEMP_THRESHOLD_F = 215.0
+
+# High Gen Temp Reduction is the percentage in decimal form that the calculated output will be further reduced
+# if the Generator Temperature reaches the High Gentemp Threshold.
 HIGH_GENTEMP_REDUCTION = 0.86
+
+# Medium Gentemp Reduction is the percentage in decimal form that the calculated output will be further reduced
+# if the generator temperature reaches the Medium Gentemp Threshold.
 MEDIUM_GENTEMP_REDUCTION = 0.93
 
+########### Default Sensor Values ##############
+
+# Default sensor values are used for the calculations when the sensor is not discovered, or does not exist.
 DEFAULT_ALTITUDE_FEET = 1000.0
 DEFAULT_GENERATOR_TEMP_F = 180.0
 DEFAULT_OUTDOOR_TEMP_F = 77.0
+
+###############################################################
+######### End User Configurable Settings ######################
+###############################################################
 
 class GeneratorDeratingMonitor:
     def __init__(self):
@@ -64,19 +106,16 @@ class GeneratorDeratingMonitor:
         self.settings_service_name = SETTINGS_SERVICE_NAME
         self.gen_auto_current_service = None
         self.gen_auto_current_state = None
-        self.previous_gen_auto_current_state = None # Initialize here
+        self.previous_gen_auto_current_state = None
         self.initial_derated_output_logged = False
         self.initial_altitude = None
         self.initial_outdoor_temp = None
         self.initial_generator_temp = None
-        self.previous_ac_current_limit = None # New variable to store the previously set AC current limit
-        self.previous_generator_current_limit_setting = None # Track changes in the generator current limit setting
-
-        # START CORRECTION
+        self.previous_ac_current_limit = None
+        self.previous_generator_current_limit_setting = None
         self.outdoor_temp_fahrenheit = DEFAULT_OUTDOOR_TEMP_F
         self.altitude_feet = DEFAULT_ALTITUDE_FEET
         self.generator_temp_fahrenheit = DEFAULT_GENERATOR_TEMP_F
-        # END CORRECTION
         
         GLib.timeout_add_seconds(2, self._delayed_initialization)
 
@@ -112,7 +151,7 @@ class GeneratorDeratingMonitor:
             self.previous_generator_current_limit_setting = round(float(current_limit), 1)
             logging.info(f"Initial Generator Current Limit setting: {self.previous_generator_current_limit_setting:.1f} Amps")
 
-        # Initial read of the AC active input current limit for the new feature
+        # Initial read of the AC active input current limit
         ac_limit = self._get_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH)
         if ac_limit is not None:
             self.previous_ac_current_limit = round(float(ac_limit), 1)
@@ -312,13 +351,10 @@ class GeneratorDeratingMonitor:
             derating_factor = self.calculate_derating_factor(
                 self.outdoor_temp_fahrenheit, self.altitude_feet, self.generator_temp_fahrenheit
             )
-            # START CORRECTION
             derated_output_amps = BASE_GENERATOR_OUTPUT_AMPS * derating_factor
             rounded_output = round(derated_output_amps, 1)
-            # END CORRECTION
 
             # Store the derated current limit in the settings path for the transfer switch
-            # START CORRECTION - Refined logic and logging for settings update
             current_generator_limit_setting = self._get_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH)
 
             if not self.initial_derated_output_logged:
@@ -330,12 +366,9 @@ class GeneratorDeratingMonitor:
                 logging.info(f"Transfer Switch Generator Current Limit updated to: {rounded_output:.1f} Amps (due to auto derating)")
             else:
                 logging.debug(f"Transfer Switch Generator Current Limit remains: {rounded_output:.1f} Amps")
-            # END CORRECTION
 
         else:
-            # START CORRECTION - Log level change
             logging.warning("Not all temperature or altitude data available for derating. Skipping calculation.")
-            # END CORRECTION
 
     def _sync_generator_limit_to_ac_input(self):
         if self.vebus_service and self._is_generator_running():
@@ -392,26 +425,22 @@ class GeneratorDeratingMonitor:
                 logging.debug("'Gen Auto Current' is ON (3), AC Active Input Current Limit not synced to generator current limit.")
 
     def _periodic_monitoring(self):
-        #logging.info(">>>> _periodic_monitoring heartbeat <<<<") # Re-inserted (original line)
         self._update_outdoor_temperature()
         self._update_altitude()
         self._update_generator_temperature()
         self._update_gen_auto_current_state()
 
         # Always attempt to sync the generator current limit to the AC input limit if the generator is running.
-        # This is the *original* sync behavior where the generator's limit sets the AC input limit.
         self._sync_generator_limit_to_ac_input()
 
-        # New logic: Sync generator current limit FROM AC input limit when generator is running and Gen Auto Current is OFF/DISABLED.
+        # Sync generator current limit FROM AC input limit when generator is running and Gen Auto Current is OFF/DISABLED.
         self._sync_generator_limit_from_ac_input()
 
         # Perform derating only if Gen Auto Current is on (state 3)
         if self.gen_auto_current_state == 3:
             self._perform_derating()
-        # START CORRECTION
         else:
             logging.debug(f"Gen Auto Current state is not 3. Current state: {self.gen_auto_current_state}")
-        # END CORRECTION
 
         return True
 
