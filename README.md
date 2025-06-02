@@ -10,7 +10,12 @@ This service is intended to be used in parallel with a transfer switch service. 
 the purpose of this service is to monitor the outdoor temperature, generator temperature, and altitude. The service then calculates a derated output for the generator based on these inputs. the base output (rated output) of the generator, the temperature derate variable, and the altitude derate variable can all be changed by editing auto_current.py. these variables are listed at the top of the script.
 
 INSTALL
-easiest way to install is using kevins setup helper. Manually add the repo using the following settings:
+
+Before installing, one of the digital inputs should be setup in order to enable/disable the automatic derate function.
+In the settings menu of the venus device, set one of the DI to 'Bilge Pump' and change the name to 'Gen Auto Current'.
+You can then use the 'invert' option in the device menu to turn the function on or off.
+
+The easiest way to install this package is by using kevins setup helper. Manually add the repo using the following settings:
 
 package name: GenAutoCurrent
 github user: drtinaz
