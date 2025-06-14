@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import dbus
+import dbus.exceptions
 import logging
 import os
 import sys
@@ -116,8 +117,27 @@ class GeneratorDeratingMonitor:
         self.outdoor_temp_fahrenheit = DEFAULT_OUTDOOR_TEMP_F
         self.altitude_feet = DEFAULT_ALTITUDE_FEET
         self.generator_temp_fahrenheit = DEFAULT_GENERATOR_TEMP_F
+        self.service_discovery_retries = 5 # Number of retries for service discovery
+        self.service_discovery_delay = 5 # Delay in seconds between retries
         
-        GLib.timeout_add_seconds(2, self._delayed_initialization)
+        GLib.timeout_add_seconds(5, self._delayed_initialization)
+    
+    def _find_service_with_retry(self, find_function, service_name_attribute, service_description):
+        retries = self.service_discovery_retries
+        delay = self.service_discovery_delay
+        found = False
+        while not found and retries > 0:
+            find_function()
+            if getattr(self, service_name_attribute):
+                logging.info(f"Found {service_description}: {getattr(self, service_name_attribute)}")
+                found = True
+            else:
+                logging.warning(f"Could not find {service_description}. Retrying in {delay} second(s)... ({retries-1} retries left)")
+                import time
+                time.sleep(delay)
+                retries -= 1
+        if not found:
+            logging.warning(f"Could not find {service_description} after multiple retries. Calculations may use default values.")
 
     def _delayed_initialization(self):
         self._find_initial_services()
@@ -126,19 +146,26 @@ class GeneratorDeratingMonitor:
         return GLib.SOURCE_REMOVE
 
     def _find_initial_services(self):
-        self.vebus_service = self._find_service(VEBUS_SERVICE_BASE)
-        self._find_outdoor_temperature_service()
-        self._find_generator_temperature_service()
-        self._find_gps_service()
-        self._find_transfer_switch_input()
-        self._find_gen_auto_current_input()
+        # Specific search for VE.Bus as it's critical
+        retries = self.service_discovery_retries
+        delay = self.service_discovery_delay
+        while not self.vebus_service and retries > 0:
+            self.vebus_service = self._find_service(VEBUS_SERVICE_BASE)
+            if self.vebus_service:
+                logging.info(f"Found VE.Bus service: {self.vebus_service}")
+            else:
+                logging.warning(f"Could not find VE.Bus service. Retrying in {delay} second(s)... ({retries-1} retries left)")
+                import time
+                time.sleep(delay)
+                retries -= 1
+        if not self.vebus_service:
+            logging.error("Failed to find VE.Bus service after multiple retries. Script may not function correctly.")
 
-        logging.info(f"VE.Bus service: {self.vebus_service}")
-        logging.info(f"Outdoor temp service: {self.outdoor_temp_service_name}")
-        logging.info(f"Generator temp service: {self.generator_temp_service_name}")
-        logging.info(f"GPS service: {self.gps_service_name}")
-        logging.info(f"Transfer switch service: {self.transfer_switch_service}")
-        logging.info(f"'Gen Auto Current' service: {self.gen_auto_current_service}")
+        self._find_service_with_retry(self._find_outdoor_temperature_service, 'outdoor_temp_service_name', 'outdoor temperature service')
+        self._find_service_with_retry(self._find_generator_temperature_service, 'generator_temp_service_name', 'generator temperature service')
+        self._find_service_with_retry(self._find_gps_service_internal, 'gps_service_name', 'GPS service') # Use internal helper
+        self._find_service_with_retry(self._find_transfer_switch_input_internal, 'transfer_switch_service', 'transfer switch input service') # Use internal helper
+        self._find_service_with_retry(self._find_gen_auto_current_input_internal, 'gen_auto_current_service', "'Gen Auto Current' input service") # Use internal helper
 
     def _read_initial_values(self):
         self._update_outdoor_temperature(log_update=False, log_initial=True)
@@ -167,100 +194,107 @@ class GeneratorDeratingMonitor:
             obj = self.bus.get_object(service_name, path)
             interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
             return interface.GetValue()
-        except Exception as e:
-            logging.error(f"Error getting value from {service_name}{path}: {e}")
+        except dbus.exceptions.DBusException as e: # More specific exception
+            logging.error(f"D-Bus error getting value from {service_name}{path}: {e}")
+            return None
+        except Exception as e: # Catch other unexpected errors
+            logging.error(f"Unexpected error getting value from {service_name}{path}: {e}")
             return None
 
     def _set_dbus_value(self, service_name, path, value):
         try:
             obj = self.bus.get_object(service_name, path)
             interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
-            # Use wrap_dbus_value here
             interface.SetValue(wrap_dbus_value(value))
-        except Exception as e:
-            logging.error(f"Error setting value for {service_name}{path} to {value}: {e}")
+        except dbus.exceptions.DBusException as e: # More specific exception
+            logging.error(f"D-Bus error setting value for {service_name}{path} to {value}: {e}")
+        except Exception as e: # Catch other unexpected errors
+            logging.error(f"Unexpected error setting value for {service_name}{path} to {value}: {e}")
 
-    def _find_outdoor_temperature_service(self, retries=3, delay=1):
+    def _find_outdoor_temperature_service(self):
+        self.outdoor_temp_service_name = None # Reset before search
         temperature_services = [name for name in self.bus.list_names() if name.startswith(TEMPERATURE_SERVICE_BASE)]
-        logging.info(f"Found temperature services (attempt {retries}): {temperature_services}")
         for service_name in temperature_services:
             try:
                 obj = self.bus.get_object(service_name, CUSTOM_NAME_PATH)
                 interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
                 custom_name = interface.GetValue()
-                logging.info(f"Checking service: {service_name}, CustomName: '{custom_name}'")
+                logging.debug(f"Checking service: {service_name}, CustomName: '{custom_name}' for outdoor temperature.")
                 if custom_name and "Outdoor" in custom_name:
-                    logging.info(f"Found potential outdoor temperature sensor: {service_name} (CustomName: {custom_name})")
                     self.outdoor_temp_service_name = service_name
                     return
+            except dbus.exceptions.DBusException as e:
+                logging.debug(f"D-Bus error checking CustomName for {service_name}: {e}")
             except Exception as e:
-                logging.debug(f"Error checking CustomName for {service_name}: {e}")
-        if retries > 0 and not self.outdoor_temp_service_name:
-            logging.warning(f"Could not find outdoor temperature sensor. Retrying in {delay} second(s)...")
-            import time
-            time.sleep(delay)
-            self._find_outdoor_temperature_service(retries - 1, delay)
-        elif not self.outdoor_temp_service_name:
-            logging.warning("Could not automatically find an outdoor temperature sensor with 'Outdoor' in CustomName after multiple retries.")
+                logging.debug(f"Unexpected error checking CustomName for {service_name}: {e}")
 
     def _find_generator_temperature_service(self):
+        self.generator_temp_service_name = None # Reset before search
         temperature_services = [name for name in self.bus.list_names() if name.startswith(TEMPERATURE_SERVICE_BASE)]
         for service_name in temperature_services:
             try:
                 obj = self.bus.get_object(service_name, CUSTOM_NAME_PATH)
                 interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
                 custom_name = interface.GetValue()
+                logging.debug(f"Checking service: {service_name}, CustomName: '{custom_name}' for generator temperature.")
                 if custom_name and any(keyword in custom_name for keyword in ["gen", "Gen", "generator", "Generator"]):
-                    logging.info(f"Found potential generator temperature sensor: {service_name} (CustomName: {custom_name})")
                     self.generator_temp_service_name = service_name
                     return
+            except dbus.exceptions.DBusException as e:
+                logging.debug(f"D-Bus error checking CustomName for {service_name}: {e}")
             except Exception as e:
-                logging.debug(f"Error checking CustomName for {service_name}: {e}")
+                logging.debug(f"Unexpected error checking CustomName for {service_name}: {e}")
 
             try:
                 obj = self.bus.get_object(service_name, PRODUCT_NAME_PATH)
                 interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
                 product_name = interface.GetValue()
+                logging.debug(f"Checking service: {service_name}, ProductName: '{product_name}' for generator temperature.")
                 if product_name and any(keyword in product_name for keyword in ["gen", "Gen", "generator", "Generator"]):
-                    logging.info(f"Found potential generator temperature sensor: {service_name} (ProductName: {product_name})")
                     self.generator_temp_service_name = service_name
                     return
+            except dbus.exceptions.DBusException as e:
+                logging.debug(f"D-Bus error checking ProductName for {service_name}: {e}")
             except Exception as e:
-                logging.debug(f"Error checking ProductName for {service_name}: {e}")
+                logging.debug(f"Unexpected error checking ProductName for {service_name}: {e}")
 
-    def _find_gps_service(self):
+    def _find_gps_service_internal(self): # Renamed to internal
         self.gps_service_name = self._find_service(GPS_SERVICE_BASE)
-        logging.info(f"GPS service found: {self.gps_service_name}")
+        # No logging here, handled by _find_service_with_retry
 
-    def _find_transfer_switch_input(self):
+    def _find_transfer_switch_input_internal(self): # Renamed to internal
+        self.transfer_switch_service = None # Reset before search
         service_names = [name for name in self.bus.list_names() if name.startswith(DIGITAL_INPUT_SERVICE_BASE)]
         for service_name in service_names:
             try:
                 obj = self.bus.get_object(service_name, PRODUCT_NAME_PATH)
                 interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
                 product_name = interface.GetValue()
+                logging.debug(f"Checking service: {service_name}, ProductName: '{product_name}' for transfer switch.")
                 if product_name and ("Transfer Switch" in product_name or "transfer switch" in product_name):
-                    logging.info(f"Found External AC Transfer Switch input: {service_name} (ProductName: '{product_name}')")
                     self.transfer_switch_service = service_name
                     return
+            except dbus.exceptions.DBusException as e:
+                logging.debug(f"D-Bus error checking product name for {service_name}: {e}")
             except Exception as e:
-                logging.debug(f"Error checking product name for {service_name}: {e}")
-        logging.warning("Could not find a digital input with 'Transfer Switch' in its product name.")
+                logging.debug(f"Unexpected error checking product name for {service_name}: {e}")
 
-    def _find_gen_auto_current_input(self):
+    def _find_gen_auto_current_input_internal(self): # Renamed to internal
+        self.gen_auto_current_service = None # Reset before search
         service_names = [name for name in self.bus.list_names() if name.startswith(DIGITAL_INPUT_SERVICE_BASE)]
         for service_name in service_names:
             try:
                 obj = self.bus.get_object(service_name, PRODUCT_NAME_PATH)
                 interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
                 product_name = interface.GetValue()
+                logging.debug(f"Checking service: {service_name}, ProductName: '{product_name}' for Gen Auto Current.")
                 if product_name and ("Gen Auto Current" in product_name or "gen auto current" in product_name):
-                    logging.info(f"Found 'Gen Auto Current' input: {service_name} (ProductName: '{product_name}')")
                     self.gen_auto_current_service = service_name
                     return
+            except dbus.exceptions.DBusException as e:
+                logging.debug(f"D-Bus error checking product name for {service_name}: {e}")
             except Exception as e:
-                logging.debug(f"Error checking product name for {service_name}: {e}")
-        logging.warning("Could not find a digital input with 'Gen Auto Current' in its product name.")
+                logging.debug(f"Unexpected error checking product name for {service_name}: {e}")
 
     def _update_outdoor_temperature(self, log_update=True, log_initial=False):
         if self.outdoor_temp_service_name:
