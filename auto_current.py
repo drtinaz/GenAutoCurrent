@@ -311,6 +311,7 @@ class GeneratorDeratingMonitor:
         if self.gps_service_name:
             altitude_meters = self._get_dbus_value(self.gps_service_name, ALTITUDE_PATH)
             if altitude_meters is not None:
+                altitude_meters = float(altitude_meters)
                 self.altitude_feet = altitude_meters * 3.28084
                 if log_initial and self.initial_altitude is None:
                     self.initial_altitude = self.altitude_feet
