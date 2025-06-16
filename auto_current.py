@@ -309,15 +309,32 @@ class GeneratorDeratingMonitor:
 
     def _update_altitude(self, log_update=True, log_initial=False):
         if self.gps_service_name:
-            altitude_meters = self._get_dbus_value(self.gps_service_name, ALTITUDE_PATH)
-            if altitude_meters is not None:
-                altitude_meters = float(altitude_meters)
-                self.altitude_feet = altitude_meters * 3.28084
-                if log_initial and self.initial_altitude is None:
-                    self.initial_altitude = self.altitude_feet
-                    logging.info(f"Initial Altitude: {self.initial_altitude:.2f} feet")
-                elif log_update:
-                    logging.debug(f"Updated altitude: {self.altitude_feet:.2f} feet")
+            altitude_raw = self._get_dbus_value(self.gps_service_name, ALTITUDE_PATH)
+            if altitude_raw is not None:
+                try:
+                    # Check if altitude_raw is a dbus.Array and extract the first element
+                    if isinstance(altitude_raw, dbus.Array):
+                        if altitude_raw: # Ensure the array is not empty
+                            altitude_meters = float(altitude_raw[0])
+                        else:
+                            logging.warning("Received empty dbus.Array for altitude. Using default value.")
+                            altitude_meters = None # Or keep using the previous value, or a default
+                    else:
+                        altitude_meters = float(altitude_raw)
+
+                    if altitude_meters is not None:
+                        self.altitude_feet = altitude_meters * 3.28084
+                        if log_initial and self.initial_altitude is None:
+                            self.initial_altitude = self.altitude_feet
+                            logging.info(f"Initial Altitude: {self.initial_altitude:.2f} feet")
+                        elif log_update:
+                            logging.debug(f"Updated altitude: {self.altitude_feet:.2f} feet")
+                except (ValueError, TypeError) as e:
+                    logging.error(f"Error converting altitude_raw '{altitude_raw}' to float: {e}. Using previous or default altitude.")
+                    # Optionally, decide whether to use the last known good value or DEFAULT_ALTITUDE_FEET
+                    # self.altitude_feet remains its previous value if an error occurs
+            else:
+                logging.debug("Could not retrieve altitude from D-Bus.")
 
     def _update_generator_temperature(self, log_update=True, log_initial=False):
         if self.generator_temp_service_name:
