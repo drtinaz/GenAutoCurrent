@@ -124,7 +124,7 @@ class GeneratorDeratingMonitor:
         self.service_discovery_retries = 1 # Set retries to 1 for initial discovery to quickly move to monitoring
         self.service_discovery_delay = 5 # Delay in seconds between retries
 
-        GLib.timeout_add_seconds(10, self._delayed_initialization)
+        GLib.timeout_add_seconds(5, self._delayed_initialization)
 
     def _find_service_once(self, find_function, service_name_attribute, service_description):
         """Attempts to find a service once and logs the result."""
