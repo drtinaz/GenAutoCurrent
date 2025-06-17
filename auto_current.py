@@ -124,7 +124,7 @@ class GeneratorDeratingMonitor:
         self.service_discovery_retries = 5 # Number of retries for service discovery
         self.service_discovery_delay = 5 # Delay in seconds between retries
         
-        GLib.timeout_add_seconds(5, self._delayed_initialization)
+        GLib.timeout_add_seconds(10, self._delayed_initialization)
     
     def _find_service_with_retry(self, find_function, service_name_attribute, service_description):
         retries = self.service_discovery_retries
