@@ -39,6 +39,10 @@ GENERATOR_CURRENT_LIMIT_PATH = "/Settings/TransferSwitch/GeneratorCurrentLimit"
 GENERATOR_ON_VALUE = (12, 3) # value 12 if using Guimods, value 3 if not
 SHORE_POWER_ON_VALUE = (13, 2) # value 13 if using Guimods, value 2 if not
 
+# Gen Auto Current State Values
+GEN_AUTO_CURRENT_OFF = 2
+GEN_AUTO_CURRENT_ON = 3
+
 #############################################################
 ####### User Configurable Settings ##########################
 #############################################################
@@ -355,17 +359,19 @@ class GeneratorDeratingMonitor:
         if self.gen_auto_current_service:
             state = self._get_dbus_value(self.gen_auto_current_service, STATE_PATH)
             if state is not None:
+                # Ensure state is an integer for comparison
+                state = int(state) 
                 if initial_read:
                     self.gen_auto_current_state = state
                     self.previous_gen_auto_current_state = state
-                    logging.info(f"Initial 'Gen Auto Current' state: {self.gen_auto_current_state}")
+                    logging.info(f"Initial 'Gen Auto Current' state: {self.gen_auto_current_state} (ON: {GEN_AUTO_CURRENT_ON}, OFF: {GEN_AUTO_CURRENT_OFF})")
                 elif state != self.previous_gen_auto_current_state:
                     self.previous_gen_auto_current_state = self.gen_auto_current_state
                     self.gen_auto_current_state = state
-                    logging.info(f"'Gen Auto Current' state changed to: {self.gen_auto_current_state}")
+                    logging.info(f"'Gen Auto Current' state changed to: {self.gen_auto_current_state} (ON: {GEN_AUTO_CURRENT_ON}, OFF: {GEN_AUTO_CURRENT_OFF})")
                 else:
                     self.gen_auto_current_state = state # Keep current state updated even if not logged
-                    logging.debug(f"'Gen Auto Current' state remains: {self.gen_auto_current_state}")
+                    logging.debug(f"'Gen Auto Current' state remains: {self.gen_auto_current_state} (ON: {GEN_AUTO_CURRENT_ON}, OFF: {GEN_AUTO_CURRENT_OFF})")
             else:
                 logging.debug("Could not retrieve 'Gen Auto Current' state from D-Bus.")
 
@@ -473,8 +479,8 @@ class GeneratorDeratingMonitor:
         elif self.vebus_service:
             if not self._is_generator_running():
                 logging.debug("Generator not running, AC Active Input Current Limit not synced to generator current limit.")
-            elif self.gen_auto_current_state == 3:
-                logging.debug("'Gen Auto Current' is ON (3), AC Active Input Current Limit not synced to generator current limit.")
+            elif self.gen_auto_current_state == GEN_AUTO_CURRENT_ON: # Use constant here
+                logging.debug(f"'Gen Auto Current' is ON ({GEN_AUTO_CURRENT_ON}), AC Active Input Current Limit not synced to generator current limit.")
 
     def _periodic_monitoring(self):
         self._update_outdoor_temperature()
@@ -486,13 +492,18 @@ class GeneratorDeratingMonitor:
         self._sync_generator_limit_to_ac_input()
 
         # Sync generator current limit FROM AC input limit when generator is running and Gen Auto Current is OFF/DISABLED.
-        self._sync_generator_limit_from_ac_input()
+        # This condition needs to be adjusted based on the new understanding. If Gen Auto Current is OFF,
+        # then the manual changes from AC input should be allowed to propagate to the generator limit.
+        if self._is_generator_running() and self.gen_auto_current_state == GEN_AUTO_CURRENT_OFF:
+             self._sync_generator_limit_from_ac_input()
+        else:
+             logging.debug(f"Generator not running or 'Gen Auto Current' is ON ({self.gen_auto_current_state}). Skipping sync from AC input.")
 
         # Perform derating only if Gen Auto Current is on (state 3)
-        if self.gen_auto_current_state == 3:
+        if self.gen_auto_current_state == GEN_AUTO_CURRENT_ON:
             self._perform_derating()
         else:
-            logging.debug(f"Gen Auto Current state is not 3. Current state: {self.gen_auto_current_state}")
+            logging.debug(f"Gen Auto Current state is not ON ({GEN_AUTO_CURRENT_ON}). Current state: {self.gen_auto_current_state}")
 
         return True
 
