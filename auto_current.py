@@ -415,7 +415,7 @@ class GeneratorDeratingMonitor:
                 self.initial_derated_output_logged = True
             elif current_generator_limit_setting is None or abs(current_generator_limit_setting - rounded_output) > 0.01: # Only log if the value actually changes significantly
                 self._set_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH, rounded_output)
-                logging.info(f"Transfer Switch Generator Current Limit updated to: {rounded_output:.1f} Amps (due to auto derating)")
+                logging.debug(f"Transfer Switch Generator Current Limit updated to: {rounded_output:.1f} Amps (due to auto derating)")
             else:
                 logging.debug(f"Transfer Switch Generator Current Limit remains: {rounded_output:.1f} Amps")
 
@@ -431,7 +431,7 @@ class GeneratorDeratingMonitor:
                 # Check if the generator limit has changed or if the AC input limit needs to be set initially
                 if self.previous_generator_current_limit_setting is None or abs(self.previous_generator_current_limit_setting - rounded_gen_limit) > 0.01:
                     self._set_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH, rounded_gen_limit)
-                    logging.info(f"Generator running: Synced VE.Bus AC Active Input Current Limit to Generator Current Limit ({rounded_gen_limit:.1f} Amps).")
+                    logging.debug(f"Generator running: Synced VE.Bus AC Active Input Current Limit to Generator Current Limit ({rounded_gen_limit:.1f} Amps).")
                     self.previous_ac_current_limit = rounded_gen_limit # Keep previous_ac_current_limit in sync
                     self.previous_generator_current_limit_setting = rounded_gen_limit # Update the previous generator limit setting
                 else:
