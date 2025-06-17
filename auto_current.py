@@ -55,7 +55,7 @@ BASE_TEMPERATURE_THRESHOLD_F = 77.0
 
 # Temp coefficient is the multiplier that the output should be derated above the base
 # Temperature Threshold. (ie. if the output is to be derated 6% for every 10 deg F
-# above the base temp threshold, the coefficent is determined by multiplying the 
+# above the base temp threshold, the coefficent is determined by multiplying the
 # percent in decimal form '.06' by the number of feet '10' = 0.006. you must include the leading zero)
 TEMP_COEFFICIENT = 0.006
 
@@ -121,55 +121,33 @@ class GeneratorDeratingMonitor:
         self.outdoor_temp_fahrenheit = DEFAULT_OUTDOOR_TEMP_F
         self.altitude_feet = DEFAULT_ALTITUDE_FEET
         self.generator_temp_fahrenheit = DEFAULT_GENERATOR_TEMP_F
-        self.service_discovery_retries = 5 # Number of retries for service discovery
+        self.service_discovery_retries = 1 # Set retries to 1 for initial discovery to quickly move to monitoring
         self.service_discovery_delay = 5 # Delay in seconds between retries
-        
+
         GLib.timeout_add_seconds(10, self._delayed_initialization)
-    
-    def _find_service_with_retry(self, find_function, service_name_attribute, service_description):
-        retries = self.service_discovery_retries
-        delay = self.service_discovery_delay
-        found = False
-        while not found and retries > 0:
-            find_function()
-            if getattr(self, service_name_attribute):
-                logging.info(f"Found {service_description}: {getattr(self, service_name_attribute)}")
-                found = True
-            else:
-                logging.warning(f"Could not find {service_description}. Retrying in {delay} second(s)... ({retries-1} retries left)")
-                import time
-                time.sleep(delay)
-                retries -= 1
-        if not found:
-            logging.warning(f"Could not find {service_description} after multiple retries. Calculations may use default values.")
+
+    def _find_service_once(self, find_function, service_name_attribute, service_description):
+        """Attempts to find a service once and logs the result."""
+        find_function()
+        if getattr(self, service_name_attribute):
+            logging.info(f"Found {service_description}: {getattr(self, service_name_attribute)}")
+            return True
+        else:
+            logging.warning(f"Could not find {service_description}. Will retry in periodic monitoring.")
+            return False
 
     def _delayed_initialization(self):
-        self._find_initial_services()
+        # Initial attempts to find services (without extensive retries here)
+        self._find_service_once(self._find_vebus_service, 'vebus_service', 'VE.Bus service')
+        self._find_service_once(self._find_outdoor_temperature_service, 'outdoor_temp_service_name', 'outdoor temperature service')
+        self._find_service_once(self._find_generator_temperature_service, 'generator_temp_service_name', 'generator temperature service')
+        self._find_service_once(self._find_gps_service_internal, 'gps_service_name', 'GPS service')
+        self._find_service_once(self._find_transfer_switch_input_internal, 'transfer_switch_service', 'transfer switch input service')
+        self._find_service_once(self._find_gen_auto_current_input_internal, 'gen_auto_current_service', "'Gen Auto Current' input service")
+
         self._read_initial_values()
         GLib.timeout_add(5000, self._periodic_monitoring)
         return GLib.SOURCE_REMOVE
-
-    def _find_initial_services(self):
-        # Specific search for VE.Bus as it's critical
-        retries = self.service_discovery_retries
-        delay = self.service_discovery_delay
-        while not self.vebus_service and retries > 0:
-            self.vebus_service = self._find_service(VEBUS_SERVICE_BASE)
-            if self.vebus_service:
-                logging.info(f"Found VE.Bus service: {self.vebus_service}")
-            else:
-                logging.warning(f"Could not find VE.Bus service. Retrying in {delay} second(s)... ({retries-1} retries left)")
-                import time
-                time.sleep(delay)
-                retries -= 1
-        if not self.vebus_service:
-            logging.error("Failed to find VE.Bus service after multiple retries. Script may not function correctly.")
-
-        self._find_service_with_retry(self._find_outdoor_temperature_service, 'outdoor_temp_service_name', 'outdoor temperature service')
-        self._find_service_with_retry(self._find_generator_temperature_service, 'generator_temp_service_name', 'generator temperature service')
-        self._find_service_with_retry(self._find_gps_service_internal, 'gps_service_name', 'GPS service') # Use internal helper
-        self._find_service_with_retry(self._find_transfer_switch_input_internal, 'transfer_switch_service', 'transfer switch input service') # Use internal helper
-        self._find_service_with_retry(self._find_gen_auto_current_input_internal, 'gen_auto_current_service', "'Gen Auto Current' input service") # Use internal helper
 
     def _read_initial_values(self):
         self._update_outdoor_temperature(log_update=False, log_initial=True)
@@ -188,12 +166,16 @@ class GeneratorDeratingMonitor:
             self.previous_ac_current_limit = round(float(ac_limit), 1)
             logging.info(f"Initial VE.Bus AC Active Input Current Limit: {self.previous_ac_current_limit:.1f} Amps")
 
-
     def _find_service(self, service_base):
         services = [name for name in self.bus.list_names() if name.startswith(service_base)]
         return services[0] if services else None
 
+    def _find_vebus_service(self):
+        self.vebus_service = self._find_service(VEBUS_SERVICE_BASE)
+
     def _get_dbus_value(self, service_name, path):
+        if not service_name: # Added check
+            return None
         try:
             obj = self.bus.get_object(service_name, path)
             interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
@@ -206,6 +188,9 @@ class GeneratorDeratingMonitor:
             return None
 
     def _set_dbus_value(self, service_name, path, value):
+        if not service_name: # Added check
+            logging.warning(f"Attempted to set D-Bus value for {path} but service_name is None.")
+            return
         try:
             obj = self.bus.get_object(service_name, path)
             interface = dbus.Interface(obj, BUS_ITEM_INTERFACE)
@@ -310,6 +295,10 @@ class GeneratorDeratingMonitor:
                     logging.info(f"Initial Outdoor Temperature: {self.initial_outdoor_temp:.2f} F")
                 elif log_update:
                     logging.debug(f"Updated outdoor temperature: {self.outdoor_temp_fahrenheit:.2f} F")
+            else:
+                logging.debug("Could not retrieve outdoor temperature from D-Bus. Service might be gone or path invalid.")
+        else:
+            logging.debug("Outdoor temperature service not found. Using default value.")
 
     def _update_altitude(self, log_update=True, log_initial=False):
         if self.gps_service_name:
@@ -335,10 +324,10 @@ class GeneratorDeratingMonitor:
                             logging.debug(f"Updated altitude: {self.altitude_feet:.2f} feet")
                 except (ValueError, TypeError) as e:
                     logging.error(f"Error converting altitude_raw '{altitude_raw}' to float: {e}. Using previous or default altitude.")
-                    # Optionally, decide whether to use the last known good value or DEFAULT_ALTITUDE_FEET
-                    # self.altitude_feet remains its previous value if an error occurs
             else:
-                logging.debug("Could not retrieve altitude from D-Bus.")
+                logging.debug("Could not retrieve altitude from D-Bus. Service might be gone or path invalid.")
+        else:
+            logging.debug("GPS service not found for altitude. Using default value.")
 
     def _update_generator_temperature(self, log_update=True, log_initial=False):
         if self.generator_temp_service_name:
@@ -353,14 +342,16 @@ class GeneratorDeratingMonitor:
                 elif log_update:
                     logging.debug(f"Generator temperature: {self.generator_temp_fahrenheit:.2f} F (below threshold)")
             else:
-                logging.debug("Could not retrieve generator temperature from D-Bus.")
+                logging.debug("Could not retrieve generator temperature from D-Bus. Service might be gone or path invalid.")
+        else:
+            logging.debug("Generator temperature service not found. Using default value.")
 
     def _update_gen_auto_current_state(self, initial_read=False):
         if self.gen_auto_current_service:
             state = self._get_dbus_value(self.gen_auto_current_service, STATE_PATH)
             if state is not None:
                 # Ensure state is an integer for comparison
-                state = int(state) 
+                state = int(state)
                 if initial_read:
                     self.gen_auto_current_state = state
                     self.previous_gen_auto_current_state = state
@@ -373,7 +364,10 @@ class GeneratorDeratingMonitor:
                     self.gen_auto_current_state = state # Keep current state updated even if not logged
                     logging.debug(f"'Gen Auto Current' state remains: {self.gen_auto_current_state} (ON: {GEN_AUTO_CURRENT_ON}, OFF: {GEN_AUTO_CURRENT_OFF})")
             else:
-                logging.debug("Could not retrieve 'Gen Auto Current' state from D-Bus.")
+                logging.debug("Could not retrieve 'Gen Auto Current' state from D-Bus. Service might be gone or path invalid.")
+        else:
+            logging.debug("'Gen Auto Current' input service not found. Cannot read state.")
+
 
     def _is_generator_running(self):
         if self.transfer_switch_service:
@@ -457,7 +451,7 @@ class GeneratorDeratingMonitor:
         This helps prevent a looping problem by only reacting to external changes
         in the AC input limit.
         """
-        
+
         if self.vebus_service and self._is_generator_running():
             current_ac_limit = self._get_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH)
             if current_ac_limit is not None:
@@ -483,6 +477,20 @@ class GeneratorDeratingMonitor:
                 logging.debug(f"'Gen Auto Current' is ON ({GEN_AUTO_CURRENT_ON}), AC Active Input Current Limit not synced to generator current limit.")
 
     def _periodic_monitoring(self):
+        # Re-attempt to find services if they are not yet discovered
+        if not self.vebus_service:
+            self._find_service_once(self._find_vebus_service, 'vebus_service', 'VE.Bus service')
+        if not self.outdoor_temp_service_name:
+            self._find_service_once(self._find_outdoor_temperature_service, 'outdoor_temp_service_name', 'outdoor temperature service')
+        if not self.generator_temp_service_name:
+            self._find_service_once(self._find_generator_temperature_service, 'generator_temp_service_name', 'generator temperature service')
+        if not self.gps_service_name:
+            self._find_service_once(self._find_gps_service_internal, 'gps_service_name', 'GPS service')
+        if not self.transfer_switch_service:
+            self._find_service_once(self._find_transfer_switch_input_internal, 'transfer_switch_service', 'transfer switch input service')
+        if not self.gen_auto_current_service:
+            self._find_service_once(self._find_gen_auto_current_input_internal, 'gen_auto_current_service', "'Gen Auto Current' input service")
+
         self._update_outdoor_temperature()
         self._update_altitude()
         self._update_generator_temperature()
