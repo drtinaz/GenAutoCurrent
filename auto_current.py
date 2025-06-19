@@ -123,6 +123,8 @@ class GeneratorDeratingMonitor:
         self.generator_temp_fahrenheit = DEFAULT_GENERATOR_TEMP_F
         self.service_discovery_retries = 1 # Set retries to 1 for initial discovery to quickly move to monitoring
         self.service_discovery_delay = 5 # Delay in seconds between retries
+        self.altitude_warning_logged = False
+        self.altitude_value_logged_after_warning = False
 
         GLib.timeout_add_seconds(5, self._delayed_initialization)
 
@@ -303,15 +305,18 @@ class GeneratorDeratingMonitor:
     def _update_altitude(self, log_update=True, log_initial=False):
         if self.gps_service_name:
             altitude_raw = self._get_dbus_value(self.gps_service_name, ALTITUDE_PATH)
+            altitude_meters = None # Initialize to None
+
             if altitude_raw is not None:
                 try:
-                    # Check if altitude_raw is a dbus.Array and extract the first element
                     if isinstance(altitude_raw, dbus.Array):
-                        if altitude_raw: # Ensure the array is not empty
+                        if altitude_raw:
                             altitude_meters = float(altitude_raw[0])
                         else:
-                            logging.warning("Received empty dbus.Array for altitude. Using previous value.")
-                            altitude_meters = None # Or keep using the previous value, or a default
+                            if not self.altitude_warning_logged:
+                                logging.warning("Received empty dbus.Array for altitude. Using previous or default altitude.")
+                                self.altitude_warning_logged = True
+                            self.altitude_value_logged_after_warning = False # Reset flag for next valid value
                     else:
                         altitude_meters = float(altitude_raw)
 
@@ -321,13 +326,28 @@ class GeneratorDeratingMonitor:
                             self.initial_altitude = self.altitude_feet
                             logging.info(f"Initial Altitude: {self.initial_altitude:.2f} feet")
                         elif log_update:
-                            logging.debug(f"Updated altitude: {self.altitude_feet:.2f} feet")
+                            if self.altitude_warning_logged or not self.altitude_value_logged_after_warning:
+                                logging.info(f"Updated altitude: {self.altitude_feet:.2f} feet")
+                                self.altitude_warning_logged = False # Reset warning flag
+                                self.altitude_value_logged_after_warning = True # Set flag to prevent continuous info logs
+                            else:
+                                logging.debug(f"Updated altitude: {self.altitude_feet:.2f} feet")
                 except (ValueError, TypeError) as e:
-                    logging.error(f"Error converting altitude_raw '{altitude_raw}' to float: {e}. Using previous or default altitude.")
+                    if not self.altitude_warning_logged:
+                        logging.warning(f"Error converting altitude_raw '{altitude_raw}' to float: {e}. Using previous or default altitude.")
+                        self.altitude_warning_logged = True
+                    self.altitude_value_logged_after_warning = False # Reset flag for next valid value
             else:
-                logging.debug("Could not retrieve altitude from D-Bus. Service might be gone or path invalid.")
+                if not self.altitude_warning_logged:
+                    logging.warning("Could not retrieve altitude from D-Bus. Service might be gone or path invalid. Using previous or default altitude.")
+                    self.altitude_warning_logged = True
+                self.altitude_value_logged_after_warning = False # Reset flag for next valid value
         else:
             logging.debug("GPS service not found for altitude. Using default value.")
+            # If GPS service is not found, we don't necessarily want to spam warnings,
+            # but we also want to ensure that if it comes back, we log the first value.
+            # So, keep altitude_warning_logged as it is, but reset the value_logged flag.
+            self.altitude_value_logged_after_warning = False
 
     def _update_generator_temperature(self, log_update=True, log_initial=False):
         if self.generator_temp_service_name:
