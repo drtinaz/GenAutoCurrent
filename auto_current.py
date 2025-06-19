@@ -56,7 +56,7 @@ BASE_TEMPERATURE_THRESHOLD_F = 77.0
 # Temp coefficient is the multiplier that the output should be derated above the base
 # Temperature Threshold. (ie. if the output is to be derated 6% for every 10 deg F
 # above the base temp threshold, the coefficent is determined by multiplying the
-# percent in decimal form '.06' by the number of feet '10' = 0.006. you must include the leading zero)
+# percent in decimal form '.06' by the number of degrees '10' = 0.006. you must include the leading zero)
 TEMP_COEFFICIENT = 0.006
 
 # Altitude Coefficient is the multiplier that the output is to be derated per foot above sea level.
