@@ -310,7 +310,7 @@ class GeneratorDeratingMonitor:
                         if altitude_raw: # Ensure the array is not empty
                             altitude_meters = float(altitude_raw[0])
                         else:
-                            logging.warning("Received empty dbus.Array for altitude. Using default value.")
+                            logging.warning("Received empty dbus.Array for altitude. Using previous value.")
                             altitude_meters = None # Or keep using the previous value, or a default
                     else:
                         altitude_meters = float(altitude_raw)
