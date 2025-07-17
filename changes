@@ -25,3 +25,5 @@ v1.8
         fix typo in comments
 v1.9
 	redirect all logging to /var/log/auto_current
+v1.10
+	fix logging error
