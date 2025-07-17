@@ -10,11 +10,10 @@ from gi.repository import GLib
 sys.path.insert(1, "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python")
 from ve_utils import wrap_dbus_value
 
-LOG_FILE = "/data/GenAutoCurrent/log"
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 # Logging setup (change level of logging level=logging.INFO or level=logging.DEBUG)
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.info("Starting Generator Derating Monitor with file logging.")
 
 # D-Bus service names and paths
