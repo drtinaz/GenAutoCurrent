@@ -7,7 +7,7 @@ BaseTemperatureThresholdF = 77.0
 
 # The multiplier for derating above the base temperature.
 # Example: For 6% derating per 10°F, the coefficient is 0.06 / 10 = 0.006.
-TempCoefficient = 0.0065
+TempCoefficient = 0.006
 
 # The multiplier for derating per foot above sea level.
 # Example: For 3% derating per 1000 ft, the coefficient is 0.03 / 1000 = 0.00003.
@@ -21,16 +21,16 @@ BaseGeneratorOutputAmps = 62.5
 OutputBuffer = 0.9
 
 # The generator temperature (in Fahrenheit) at which to apply the high temperature reduction.
-HighGenTempThresholdF = 222.0
+HighGenTempThresholdF = 220.0
 
 # The generator temperature (in Fahrenheit) at which to apply the medium temperature reduction.
-MediumGenTempThresholdF = 215.0
+MediumGenTempThresholdF = 212.0
 
 # The percentage (in decimal form) to reduce the output by when the high temperature threshold is reached.
-HighGenTempReduction = 0.86
+HighGenTempReduction = 0.85
 
 # The percentage (in decimal form) to reduce the output by when the medium temperature threshold is reached.
-MediumGenTempReduction = 0.93
+MediumGenTempReduction = 0.90
 
 [DefaultSensorValues]
 # These values are used if a required sensor (GPS, Temperature) is not found.
