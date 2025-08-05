@@ -20,3 +20,20 @@ The easiest way to install this package is by using kevins setup helper. Manuall
 package name: GenAutoCurrent
 github user: drtinaz
 branch/tag: main
+
+First time installation will require some setup. Once the package has been downloaded, open a terminal session using ssh and navigate to the package directory
+```
+cd /data/GenAutoCurrent
+```
+copy the config file to the setupOptions directory
+```
+cp config.default /data/setupOptions/GenAutoCurrent/optionsSet
+```
+now you need to adjust the user settings in the config file to match your generator and system setup
+```
+nano /data/setupOptions/GenAutoCurrent/optionsSet
+```
+once you have adjusted your configuration to your needs, we now need to finish the installation
+```
+./setup install
+```
