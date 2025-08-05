@@ -5,12 +5,13 @@ import dbus.exceptions
 import logging
 import os
 import sys
+import configparser
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 sys.path.insert(1, "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python")
 from ve_utils import wrap_dbus_value
 
-# Logging setup (change level of logging level=logging.INFO or level=logging.DEBUG)
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logging.info("Starting Generator Derating Monitor with file logging.")
 
@@ -33,73 +34,23 @@ BUS_ITEM_INTERFACE = "com.victronenergy.BusItem"
 GENERATOR_CURRENT_LIMIT_PATH = "/Settings/TransferSwitch/GeneratorCurrentLimit"
 
 # Transfer switch state values
-GENERATOR_ON_VALUE = (12, 3) # value 12 if using Guimods, value 3 if not
-SHORE_POWER_ON_VALUE = (13, 2) # value 13 if using Guimods, value 2 if not
+GENERATOR_ON_VALUE = (12, 3)
+SHORE_POWER_ON_VALUE = (13, 2)
 
 # Gen Auto Current State Values
 GEN_AUTO_CURRENT_OFF = 2
 GEN_AUTO_CURRENT_ON = 3
 
-#############################################################
-####### User Configurable Settings ##########################
-#############################################################
-
-###### Derating Constants ###########
-
-# Base Temperature Threshold is the ambient (outdoor) temperature at which point
-# the generator output begins to be derated. Usually this is 77 deg F
-BASE_TEMPERATURE_THRESHOLD_F = 77.0
-
-# Temp coefficient is the multiplier that the output should be derated above the base
-# Temperature Threshold. (ie. if the output is to be derated 6% for every 10 deg F
-# above the base temp threshold, the coefficent is determined by dividing the
-# percent in decimal form '.06' by the number of degrees '10' = 0.006. you must include the leading zero)
-TEMP_COEFFICIENT = 0.0065
-
-# Altitude Coefficient is the multiplier that the output is to be derated per foot above sea level.
-# (ie. if the derating for altitude is 3% for every 1000 feet above sea level, then the coefficient
-# is determined by dividing the percentage in deccimal form '.03' by the number of feet '1000' = 0.00003.
-# You must include the leading zero.)
-ALTITUDE_COEFFICIENT = 0.00003
-
-# Base Generator Output is the rated output capacity of the generator at sea level, in amps.
-BASE_GENERATOR_OUTPUT_AMPS = 62.5
-
-# Output Buffer is used to prevent the generator from operating at maximum output capacity.
-# The calculated generator output will be multiplied by this factor. (to limit the generator output
-# to 90% of rated capacity, set this to 0.9)
-OUTPUT_BUFFER = 0.9
-
-# High GenTemp Threshold is the generator temperature at which the calculated output will be multiplied
-# by the High GenTemp reduction value
-HIGH_GENTEMP_THRESHOLD_F = 222.0
-
-# Medium GenTemp Threshold is the generator temperature at which the calculated output will be multiplied
-# by the Medium Gentemp reduction value
-MEDIUM_GENTEMP_THRESHOLD_F = 215.0
-
-# High Gen Temp Reduction is the percentage in decimal form that the calculated output will be further reduced
-# if the Generator Temperature reaches the High Gentemp Threshold.
-HIGH_GENTEMP_REDUCTION = 0.86
-
-# Medium Gentemp Reduction is the percentage in decimal form that the calculated output will be further reduced
-# if the generator temperature reaches the Medium Gentemp Threshold.
-MEDIUM_GENTEMP_REDUCTION = 0.93
-
-########### Default Sensor Values ##############
-
-# Default sensor values are used for the calculations when the sensor is not discovered, or does not exist.
-DEFAULT_ALTITUDE_FEET = 1000.0
-DEFAULT_GENERATOR_TEMP_F = 180.0
-DEFAULT_OUTDOOR_TEMP_F = 77.0
-
-###############################################################
-######### End User Configurable Settings ######################
-###############################################################
+# CORRECTED: Configuration file path
+CONFIG_FILE_PATH = '/data/setupOptions/GenAutoCurrent/optionsSet'
 
 class GeneratorDeratingMonitor:
     def __init__(self):
         self.bus = dbus.SystemBus()
+
+        # Load settings from the config file
+        self._load_and_set_config()
+
         self.vebus_service = None
         self.outdoor_temp_service_name = None
         self.generator_temp_service_name = None
@@ -115,15 +66,60 @@ class GeneratorDeratingMonitor:
         self.initial_generator_temp = None
         self.previous_ac_current_limit = None
         self.previous_generator_current_limit_setting = None
-        self.outdoor_temp_fahrenheit = DEFAULT_OUTDOOR_TEMP_F
-        self.altitude_feet = DEFAULT_ALTITUDE_FEET
-        self.generator_temp_fahrenheit = DEFAULT_GENERATOR_TEMP_F
-        self.service_discovery_retries = 1 # Set retries to 1 for initial discovery to quickly move to monitoring
-        self.service_discovery_delay = 5 # Delay in seconds between retries
+        self.outdoor_temp_fahrenheit = self.DEFAULT_OUTDOOR_TEMP_F
+        self.altitude_feet = self.DEFAULT_ALTITUDE_FEET
+        self.generator_temp_fahrenheit = self.DEFAULT_GENERATOR_TEMP_F
+        self.service_discovery_retries = 1
+        self.service_discovery_delay = 5
         self.altitude_warning_logged = False
         self.altitude_value_logged_after_warning = False
 
         GLib.timeout_add_seconds(5, self._delayed_initialization)
+        
+    def _load_and_set_config(self):
+        """Loads settings from config file, with hardcoded defaults as fallback."""
+        config = configparser.ConfigParser()
+        
+        # Set default values first
+        self.BASE_TEMPERATURE_THRESHOLD_F = 77.0
+        self.TEMP_COEFFICIENT = 0.00055
+        self.ALTITUDE_COEFFICIENT = 0.00003
+        self.BASE_GENERATOR_OUTPUT_AMPS = 60.5
+        self.OUTPUT_BUFFER = 0.9
+        self.HIGH_GENTEMP_THRESHOLD_F = 220.0
+        self.MEDIUM_GENTEMP_THRESHOLD_F = 212.0
+        self.HIGH_GENTEMP_REDUCTION = 0.85
+        self.MEDIUM_GENTEMP_REDUCTION = 0.90
+        self.DEFAULT_ALTITUDE_FEET = 1000.0
+        self.DEFAULT_GENERATOR_TEMP_F = 180.0
+        self.DEFAULT_OUTDOOR_TEMP_F = 77.0
+
+        if not os.path.exists(CONFIG_FILE_PATH):
+            logging.warning(f"Config file not found at {CONFIG_FILE_PATH}. Using default settings.")
+            return
+
+        try:
+            config.read(CONFIG_FILE_PATH)
+            logging.info(f"Successfully loaded settings from {CONFIG_FILE_PATH}")
+            
+            # Read DeratingConstants
+            self.BASE_TEMPERATURE_THRESHOLD_F = config.getfloat('DeratingConstants', 'BaseTemperatureThresholdF', fallback=self.BASE_TEMPERATURE_THRESHOLD_F)
+            self.TEMP_COEFFICIENT = config.getfloat('DeratingConstants', 'TempCoefficient', fallback=self.TEMP_COEFFICIENT)
+            self.ALTITUDE_COEFFICIENT = config.getfloat('DeratingConstants', 'AltitudeCoefficient', fallback=self.ALTITUDE_COEFFICIENT)
+            self.BASE_GENERATOR_OUTPUT_AMPS = config.getfloat('DeratingConstants', 'BaseGeneratorOutputAmps', fallback=self.BASE_GENERATOR_OUTPUT_AMPS)
+            self.OUTPUT_BUFFER = config.getfloat('DeratingConstants', 'OutputBuffer', fallback=self.OUTPUT_BUFFER)
+            self.HIGH_GENTEMP_THRESHOLD_F = config.getfloat('DeratingConstants', 'HighGenTempThresholdF', fallback=self.HIGH_GENTEMP_THRESHOLD_F)
+            self.MEDIUM_GENTEMP_THRESHOLD_F = config.getfloat('DeratingConstants', 'MediumGenTempThresholdF', fallback=self.MEDIUM_GENTEMP_THRESHOLD_F)
+            self.HIGH_GENTEMP_REDUCTION = config.getfloat('DeratingConstants', 'HighGenTempReduction', fallback=self.HIGH_GENTEMP_REDUCTION)
+            self.MEDIUM_GENTEMP_REDUCTION = config.getfloat('DeratingConstants', 'MediumGenTempReduction', fallback=self.MEDIUM_GENTEMP_REDUCTION)
+            
+            # Read DefaultSensorValues
+            self.DEFAULT_ALTITUDE_FEET = config.getfloat('DefaultSensorValues', 'DefaultAltitudeFeet', fallback=self.DEFAULT_ALTITUDE_FEET)
+            self.DEFAULT_GENERATOR_TEMP_F = config.getfloat('DefaultSensorValues', 'DefaultGeneratorTempF', fallback=self.DEFAULT_GENERATOR_TEMP_F)
+            self.DEFAULT_OUTDOOR_TEMP_F = config.getfloat('DefaultSensorValues', 'DefaultOutdoorTempF', fallback=self.DEFAULT_OUTDOOR_TEMP_F)
+
+        except (configparser.Error, ValueError) as e:
+            logging.error(f"Error reading config file {CONFIG_FILE_PATH}: {e}. Using default settings.")
 
     def _find_service_once(self, find_function, service_name_attribute, service_description):
         """Attempts to find a service once and logs the result."""
@@ -248,7 +244,6 @@ class GeneratorDeratingMonitor:
 
     def _find_gps_service_internal(self): # Renamed to internal
         self.gps_service_name = self._find_service(GPS_SERVICE_BASE)
-        # No logging here, handled by _find_service_with_retry
 
     def _find_transfer_switch_input_internal(self): # Renamed to internal
         self.transfer_switch_service = None # Reset before search
@@ -338,12 +333,9 @@ class GeneratorDeratingMonitor:
                 if not self.altitude_warning_logged:
                     logging.warning("Could not retrieve altitude from D-Bus. Service might be gone or path invalid. Using previous or default altitude.")
                     self.altitude_warning_logged = True
-                self.altitude_value_logged_after_warning = False # Reset flag for next valid value
+                self.altitude_value_logged_after_warning = False
         else:
             logging.debug("GPS service not found for altitude. Using default value.")
-            # If GPS service is not found, we don't necessarily want to spam warnings,
-            # but we also want to ensure that if it comes back, we log the first value.
-            # So, keep altitude_warning_logged as it is, but reset the value_logged flag.
             self.altitude_value_logged_after_warning = False
 
     def _update_generator_temperature(self, log_update=True, log_initial=False):
@@ -367,7 +359,6 @@ class GeneratorDeratingMonitor:
         if self.gen_auto_current_service:
             state = self._get_dbus_value(self.gen_auto_current_service, STATE_PATH)
             if state is not None:
-                # Ensure state is an integer for comparison
                 state = int(state)
                 if initial_read:
                     self.gen_auto_current_state = state
@@ -378,10 +369,10 @@ class GeneratorDeratingMonitor:
                     self.gen_auto_current_state = state
                     logging.info(f"'Gen Auto Current' state changed to: {self.gen_auto_current_state} (ON: {GEN_AUTO_CURRENT_ON}, OFF: {GEN_AUTO_CURRENT_OFF})")
                 else:
-                    self.gen_auto_current_state = state # Keep current state updated even if not logged
+                    self.gen_auto_current_state = state
                     logging.debug(f"'Gen Auto Current' state remains: {self.gen_auto_current_state} (ON: {GEN_AUTO_CURRENT_ON}, OFF: {GEN_AUTO_CURRENT_OFF})")
             else:
-                logging.debug("Could not retrieve 'Gen Auto Current' state from D-Bus. Service might be gone or path invalid.")
+                logging.debug("Could not retrieve 'Gen Auto Current' state from D-Bus.")
         else:
             logging.debug("'Gen Auto Current' input service not found. Cannot read state.")
 
@@ -389,7 +380,6 @@ class GeneratorDeratingMonitor:
     def _is_generator_running(self):
         if self.transfer_switch_service:
             state = self._get_dbus_value(self.transfer_switch_service, STATE_PATH)
-            # Check if the state is in the GENERATOR_ON_VALUE tuple
             return state in GENERATOR_ON_VALUE
         return False
 
@@ -399,38 +389,37 @@ class GeneratorDeratingMonitor:
         generator_temp_multiplier = 1.0
 
         if temperature_fahrenheit is not None:
-            if temperature_fahrenheit > BASE_TEMPERATURE_THRESHOLD_F:
-                temperature_multiplier = 1.0 - ((temperature_fahrenheit - BASE_TEMPERATURE_THRESHOLD_F) * TEMP_COEFFICIENT)
+            if temperature_fahrenheit > self.BASE_TEMPERATURE_THRESHOLD_F:
+                temperature_multiplier = 1.0 - ((temperature_fahrenheit - self.BASE_TEMPERATURE_THRESHOLD_F) * self.TEMP_COEFFICIENT)
                 temperature_multiplier = max(0.0, temperature_multiplier)
 
         if altitude_feet is not None:
-            altitude_multiplier = 1.0 - (altitude_feet * ALTITUDE_COEFFICIENT)
+            altitude_multiplier = 1.0 - (altitude_feet * self.ALTITUDE_COEFFICIENT)
             altitude_multiplier = max(0.0, altitude_multiplier)
 
         if generator_temperature_fahrenheit is not None:
-            if generator_temperature_fahrenheit >= HIGH_GENTEMP_THRESHOLD_F:
-                generator_temp_multiplier = HIGH_GENTEMP_REDUCTION
-            elif generator_temperature_fahrenheit >= MEDIUM_GENTEMP_THRESHOLD_F:
-                generator_temp_multiplier = MEDIUM_GENTEMP_REDUCTION
+            if generator_temperature_fahrenheit >= self.HIGH_GENTEMP_THRESHOLD_F:
+                generator_temp_multiplier = self.HIGH_GENTEMP_REDUCTION
+            elif generator_temperature_fahrenheit >= self.MEDIUM_GENTEMP_THRESHOLD_F:
+                generator_temp_multiplier = self.MEDIUM_GENTEMP_REDUCTION
 
-        return temperature_multiplier * altitude_multiplier * generator_temp_multiplier * OUTPUT_BUFFER
+        return temperature_multiplier * altitude_multiplier * generator_temp_multiplier * self.OUTPUT_BUFFER
 
     def _perform_derating(self):
         if self.outdoor_temp_fahrenheit is not None and self.altitude_feet is not None and self.generator_temp_fahrenheit is not None:
             derating_factor = self.calculate_derating_factor(
                 self.outdoor_temp_fahrenheit, self.altitude_feet, self.generator_temp_fahrenheit
             )
-            derated_output_amps = BASE_GENERATOR_OUTPUT_AMPS * derating_factor
+            derated_output_amps = self.BASE_GENERATOR_OUTPUT_AMPS * derating_factor
             rounded_output = round(derated_output_amps, 1)
 
-            # Store the derated current limit in the settings path for the transfer switch
             current_generator_limit_setting = self._get_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH)
 
             if not self.initial_derated_output_logged:
                 self._set_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH, rounded_output)
                 logging.info(f"Initial Transfer Switch Generator Current Limit set to: {rounded_output:.1f} Amps (due to auto derating)")
                 self.initial_derated_output_logged = True
-            elif current_generator_limit_setting is None or abs(current_generator_limit_setting - rounded_output) > 0.01: # Only log if the value actually changes significantly
+            elif current_generator_limit_setting is None or abs(current_generator_limit_setting - rounded_output) > 0.01:
                 self._set_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH, rounded_output)
                 logging.debug(f"Transfer Switch Generator Current Limit updated to: {rounded_output:.1f} Amps (due to auto derating)")
             else:
@@ -445,12 +434,11 @@ class GeneratorDeratingMonitor:
             if current_generator_limit_setting is not None:
                 rounded_gen_limit = round(float(current_generator_limit_setting), 1)
 
-                # Check if the generator limit has changed or if the AC input limit needs to be set initially
                 if self.previous_generator_current_limit_setting is None or abs(self.previous_generator_current_limit_setting - rounded_gen_limit) > 0.01:
                     self._set_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH, rounded_gen_limit)
                     logging.debug(f"Generator running: Synced VE.Bus AC Active Input Current Limit to Generator Current Limit ({rounded_gen_limit:.1f} Amps).")
-                    self.previous_ac_current_limit = rounded_gen_limit # Keep previous_ac_current_limit in sync
-                    self.previous_generator_current_limit_setting = rounded_gen_limit # Update the previous generator limit setting
+                    self.previous_ac_current_limit = rounded_gen_limit
+                    self.previous_generator_current_limit_setting = rounded_gen_limit
                 else:
                     logging.debug(f"Generator running: VE.Bus AC Active Input Current Limit already matches Generator Current Limit ({rounded_gen_limit:.1f} Amps).")
             else:
@@ -460,29 +448,19 @@ class GeneratorDeratingMonitor:
 
 
     def _sync_generator_limit_from_ac_input(self):
-        """
-        Synchronizes the generator current limit to the Active AC input limit
-        when the generator is running. This prevents the user from manually setting the Active AC Current
-        limit to a different value when the auto gen current limit feature is active. (Ensures that the derate value will
-        always overrule the manual setting when the auto feature is active)
-        This helps prevent a looping problem by only reacting to external changes
-        in the AC input limit.
-        """
-
         if self.vebus_service and self._is_generator_running():
             current_ac_limit = self._get_dbus_value(self.vebus_service, AC_ACTIVE_INPUT_CURRENT_LIMIT_PATH)
             if current_ac_limit is not None:
                 rounded_ac_limit = round(float(current_ac_limit), 1)
 
                 if self.previous_ac_current_limit is None or abs(rounded_ac_limit - self.previous_ac_current_limit) > 0.01:
-                    # Only set the generator current limit if it's different
                     current_gen_limit = self._get_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH)
                     if current_gen_limit is None or abs(current_gen_limit - rounded_ac_limit) > 0.01:
                         self._set_dbus_value(self.settings_service_name, GENERATOR_CURRENT_LIMIT_PATH, rounded_ac_limit)
                         logging.info(f"Generator running and Active AC Current Limit has been manually changed: Synced Generator Current Limit to VE.Bus AC Active Input Current Limit ({rounded_ac_limit:.1f} Amps).")
-                        self.previous_generator_current_limit_setting = rounded_ac_limit # Keep previous gen limit in sync
+                        self.previous_generator_current_limit_setting = rounded_ac_limit
 
-                    self.previous_ac_current_limit = rounded_ac_limit # Update the previous AC limit to prevent looping
+                    self.previous_ac_current_limit = rounded_ac_limit
                 else:
                     logging.debug(f"Generator running: VE.Bus AC Active Input Current Limit ({rounded_ac_limit:.1f} Amps) has not changed.")
             else:
@@ -490,11 +468,10 @@ class GeneratorDeratingMonitor:
         elif self.vebus_service:
             if not self._is_generator_running():
                 logging.debug("Generator not running, AC Active Input Current Limit not synced to generator current limit.")
-            elif self.gen_auto_current_state == GEN_AUTO_CURRENT_ON: # Use constant here
+            elif self.gen_auto_current_state == GEN_AUTO_CURRENT_ON:
                 logging.debug(f"'Gen Auto Current' is ON ({GEN_AUTO_CURRENT_ON}), AC Active Input Current Limit not synced to generator current limit.")
 
     def _periodic_monitoring(self):
-        # Re-attempt to find services if they are not yet discovered
         if not self.vebus_service:
             self._find_service_once(self._find_vebus_service, 'vebus_service', 'VE.Bus service')
         if not self.outdoor_temp_service_name:
@@ -513,18 +490,13 @@ class GeneratorDeratingMonitor:
         self._update_generator_temperature()
         self._update_gen_auto_current_state()
 
-        # Always attempt to sync the generator current limit to the AC input limit if the generator is running.
         self._sync_generator_limit_to_ac_input()
 
-        # Sync generator current limit FROM AC input limit when generator is running and Gen Auto Current is OFF/DISABLED.
-        # This condition needs to be adjusted based on the new understanding. If Gen Auto Current is OFF,
-        # then the manual changes from AC input should be allowed to propagate to the generator limit.
         if self._is_generator_running() and self.gen_auto_current_state == GEN_AUTO_CURRENT_OFF:
              self._sync_generator_limit_from_ac_input()
         else:
              logging.debug(f"Generator not running or 'Gen Auto Current' is ON ({self.gen_auto_current_state}). Skipping sync from AC input.")
 
-        # Perform derating only if Gen Auto Current is on (state 3)
         if self.gen_auto_current_state == GEN_AUTO_CURRENT_ON:
             self._perform_derating()
         else:

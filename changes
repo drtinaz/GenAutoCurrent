@@ -27,3 +27,5 @@ v1.9
 	redirect all logging to /var/log/auto_current
 v1.10
 	fix logging error
+v1.10.1
+	move user settings from the service script to a config file to survive updates
